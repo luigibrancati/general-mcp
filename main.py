@@ -14,10 +14,40 @@ Utilizzo:
 
 import asyncio
 import re
+import subprocess
+import sys
 
 from fastmcp import FastMCP
 from playwright.async_api import Page, async_playwright
 from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Installazione automatica dei browser Playwright
+# ---------------------------------------------------------------------------
+
+
+def _ensure_playwright_browsers() -> None:
+    """Installa i browser Playwright (Chromium) se non già presenti.
+
+    Necessario in ambienti di deploy (es. Horizon Prefect) dove il pacchetto
+    Python è installato ma i binari del browser non sono stati scaricati.
+    """
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+            check=True,
+            timeout=300,
+        )
+    except subprocess.CalledProcessError:
+        # --with-deps richiede root; riprova senza (solo download binario)
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=True,
+            timeout=300,
+        )
+
+
+_ensure_playwright_browsers()
 
 # URL base del portale SentenzeWeb della Corte di Cassazione
 BASE_URL = "https://www.italgiure.giustizia.it/sncass/"
