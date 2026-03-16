@@ -1,0 +1,10 @@
+[project]
+name = "test-sentenze-mcp"
+version = "0.1.0"
+description = "Server MCP per la ricerca di sentenze della Corte di Cassazione italiana tramite ItalgiureWeb"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastmcp>=3.1.1",
+    "playwright>=1.58.0",
+]
