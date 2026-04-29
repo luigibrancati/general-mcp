@@ -181,7 +181,7 @@ class BrowserReader:
         if self._browser is None:
             logger.info("Launching Chromium browser")
             self._browser = await self._playwright.chromium.launch(
-                headless=False,
+                headless=True,
                 args=[
                     "--disable-dev-shm-usage",
                     "--no-sandbox",
