@@ -239,6 +239,79 @@ async def _navigate_to_page(page: Page, target_page: int) -> bool:
     return True
 
 
+async def _handle_cookie_banners(page: Page) -> bool:
+        """Best-effort dismissal of common cookie consent overlays.
+
+        Returns:
+                True if at least one banner interaction/removal succeeded.
+        """
+        selectors = [
+                "button:has-text('Accetta tutti')",
+                "button:has-text('Accetta')",
+                "button:has-text('Accetto')",
+                "button:has-text('Consenti')",
+                "button:has-text('Chiudi')",
+                "button:has-text('OK')",
+                "button:has-text('Accept all')",
+                "button:has-text('Accept')",
+                "#onetrust-accept-btn-handler",
+                ".ot-sdk-container button",
+                ".cc-btn",
+                ".cookie-accept",
+                "[aria-label*='cookie' i]",
+        ]
+
+        for selector in selectors:
+                try:
+                        locator = page.locator(selector).first
+                        if await locator.count() == 0:
+                                continue
+                        if await locator.is_visible(timeout=700):
+                                await locator.click(timeout=1500)
+                                logger.debug("Cookie banner handled with selector: %s", selector)
+                                return True
+                except Exception:
+                        continue
+
+        try:
+                removed = await page.evaluate(
+                        """
+                        () => {
+                            const selectors = [
+                                '#onetrust-consent-sdk',
+                                '#CybotCookiebotDialog',
+                                '.cookie-banner',
+                                '.cookie-consent',
+                                '.cookies-banner',
+                                '.qc-cmp2-container',
+                                '[id*="cookie" i][role="dialog"]',
+                                '[class*="cookie" i][role="dialog"]',
+                                '[aria-label*="cookie" i]',
+                            ];
+
+                            let count = 0;
+                            for (const sel of selectors) {
+                                for (const el of document.querySelectorAll(sel)) {
+                                    if (!el || !(el instanceof HTMLElement)) continue;
+                                    el.style.display = 'none';
+                                    el.remove();
+                                    count += 1;
+                                }
+                            }
+
+                            if (document.body) {
+                                document.body.style.overflow = 'auto';
+                            }
+
+                            return count;
+                        }
+                        """
+                )
+                return bool(removed)
+        except Exception:
+                return False
+
+
 # ---------------------------------------------------------------------------
 # Strumento MCP esposto ai client
 # ---------------------------------------------------------------------------
@@ -278,6 +351,7 @@ async def cerca_sentenze(
 
             # Carica la pagina principale del portale
             await page.goto(BASE_URL, timeout=90000)
+            await _handle_cookie_banners(page)
             # Attesa per il caricamento completo del framework ZK
             await asyncio.sleep(5)
 

@@ -81,6 +81,98 @@ class BrowserReader:
         self._playwright = None
         self._browser = None
 
+    async def handle_cookie_banners(self, page) -> bool:
+            """Best-effort dismissal of common cookie consent banners.
+
+            Returns:
+                    True if at least one click/remove action was performed.
+            """
+            clicked = False
+
+            # Prefer explicit consent/reject actions on common CMP buttons.
+            selectors = [
+                    "button:has-text('Accept all')",
+                    "button:has-text('Accept All')",
+                    "button:has-text('Accept')",
+                    "button:has-text('I Agree')",
+                    "button:has-text('Agree')",
+                    "button:has-text('OK')",
+                    "button:has-text('Got it')",
+                    "button:has-text('Accetta tutti')",
+                    "button:has-text('Accetta')",
+                    "button:has-text('Accetto')",
+                    "button:has-text('Consenti')",
+                    "button:has-text('Chiudi')",
+                    "button:has-text('Continua')",
+                    "[id*='accept']",
+                    "[class*='accept']",
+                    "[aria-label*='accept' i]",
+                    "[aria-label*='cookie' i]",
+                    "#onetrust-accept-btn-handler",
+                    ".ot-sdk-container button",
+                    ".cc-btn",
+                    ".cookie-accept",
+                    ".cookie-allow",
+            ]
+
+            for selector in selectors:
+                    try:
+                            locator = page.locator(selector).first
+                            if await locator.count() == 0:
+                                    continue
+                            if await locator.is_visible(timeout=700):
+                                    await locator.click(timeout=1500)
+                                    clicked = True
+                                    logger.debug("Cookie banner action clicked with selector: %s", selector)
+                                    break
+                    except Exception:
+                            continue
+
+            # Fallback: hide common blocking overlays if a click was not possible.
+            if not clicked:
+                    try:
+                            removed_count = await page.evaluate(
+                                    """
+                                    () => {
+                                        const selectors = [
+                                            '#onetrust-consent-sdk',
+                                            '#CybotCookiebotDialog',
+                                            '.cookie-banner',
+                                            '.cookie-consent',
+                                            '.cookies-banner',
+                                            '.qc-cmp2-container',
+                                            '[id*="cookie" i][role="dialog"]',
+                                            '[class*="cookie" i][role="dialog"]',
+                                            '[aria-label*="cookie" i]',
+                                            'div[style*="z-index"][id*="cookie" i]',
+                                        ];
+
+                                        let removed = 0;
+                                        for (const sel of selectors) {
+                                            for (const el of document.querySelectorAll(sel)) {
+                                                if (!el || !(el instanceof HTMLElement)) continue;
+                                                el.style.display = 'none';
+                                                el.remove();
+                                                removed += 1;
+                                            }
+                                        }
+
+                                        const body = document.body;
+                                        if (body) {
+                                            body.style.overflow = 'auto';
+                                        }
+                                        return removed;
+                                    }
+                                    """
+                            )
+                            if removed_count:
+                                    clicked = True
+                                    logger.debug("Cookie overlays removed via DOM fallback: %s", removed_count)
+                    except Exception:
+                            pass
+
+            return clicked
+
     async def startup(self) -> None:
         startup_started_at = time.perf_counter()
         if self._playwright is None:
@@ -89,7 +181,7 @@ class BrowserReader:
         if self._browser is None:
             logger.info("Launching Chromium browser")
             self._browser = await self._playwright.chromium.launch(
-                headless=True,
+                headless=False,
                 args=[
                     "--disable-dev-shm-usage",
                     "--no-sandbox",
@@ -133,6 +225,7 @@ class BrowserReader:
 
         diagnostics: Dict[str, Any] = {
             "used_cookie_click": False,
+            "cookie_banner_handled": False,
             "reader_success": False,
             "extraction_notes": "",
         }
@@ -141,22 +234,17 @@ class BrowserReader:
         final_url: Optional[str] = None
 
         try:
-            logger.debug("Navigating page and waiting for network idle")
-            resp = await page.goto(url, wait_until="networkidle", timeout=30000)
+            logger.debug("Navigating page and waiting for body in DOM")
+            resp = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_selector("body", state="attached", timeout=60000)
             if resp is not None:
                 status_code = resp.status
                 final_url = resp.url
                 logger.info("Navigation completed: status=%s final_url=%s", status_code, final_url)
 
-            # opzionale: tentativo generico di click sul banner cookie
-            try:
-                cookie_button = await page.query_selector("button:has-text('Accetta')")  # molto generico
-                if cookie_button:
-                    await cookie_button.click()
-                    diagnostics["used_cookie_click"] = True
-                    logger.debug("Cookie banner accepted via generic button selector")
-            except Exception:
-                pass
+            # Best-effort cookie banner handling to avoid blocked content/actions.
+            diagnostics["cookie_banner_handled"] = await self.handle_cookie_banners(page)
+            diagnostics["used_cookie_click"] = diagnostics["cookie_banner_handled"]
 
             # scroll per attivare eventuali lazy load
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
