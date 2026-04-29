@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -279,17 +278,17 @@ browser_reader = BrowserReader()
 
 
 @mcp.tool()
-def browse_extract(url: str, mode: str = "article") -> Dict[str, Any]:
+async def browse_extract(url: str, mode: str = "article") -> Dict[str, Any]:
     """
     Carica una pagina in un browser headless, esegue il rendering
     e prova a estrarre il contenuto principale (titolo, testo, meta).
     `mode` per ora è solo informativo.
     """
-    result = asyncio.run(browser_reader.browse_and_extract(url, mode=mode))
+    result = await browser_reader.browse_and_extract(url, mode=mode)
     return asdict(result)
 
 @mcp.tool()
-def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
+async def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
     """Cerca sentenze della Corte di Cassazione sul portale ItalgiureWeb.
 
     Apre il portale SentenzeWeb, inserisce le parole chiave nel campo
@@ -308,7 +307,7 @@ def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
     Returns:
         RisultatoRicerca con i metadati di paginazione e la lista delle sentenze.
     """
-    return asyncio.run(cerca_sentenze(parole, pagina))
+    return await cerca_sentenze(parole, pagina)
 
 if __name__ == "__main__":
     # Heroku richiede un processo web in ascolto su PORT,
