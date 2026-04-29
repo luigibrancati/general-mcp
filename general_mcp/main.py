@@ -11,7 +11,7 @@ from readability import Document as ReadabilityDocument  # readability-lxml
 from lxml import html as lxml_html
 import subprocess
 import sys
-from sentenze import cerca_sentenze  # import dello strumento Sentenze come esempio di tool aggiuntivo
+from general_mcp.sentenze import cerca_sentenze  # import dello strumento Sentenze come esempio di tool aggiuntivo
 
 
 # ---------------------------------------------------------------------------
