@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +13,14 @@ from lxml import html as lxml_html
 import subprocess
 import sys
 from general_mcp.sentenze import cerca_sentenze  # import dello strumento Sentenze come esempio di tool aggiuntivo
+
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +35,7 @@ def _ensure_playwright_browsers() -> None:
     Python è installato ma i binari del browser non sono stati scaricati.
     """
     try:
+        logger.info("Installing Playwright Chromium with dependencies")
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
             check=True,
@@ -32,6 +43,7 @@ def _ensure_playwright_browsers() -> None:
         )
     except subprocess.CalledProcessError:
         # --with-deps richiede root; riprova senza (solo download binario)
+        logger.warning("Playwright install with dependencies failed; retrying without dependencies")
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
             check=True,
@@ -70,9 +82,12 @@ class BrowserReader:
         self._browser = None
 
     async def startup(self) -> None:
+        startup_started_at = time.perf_counter()
         if self._playwright is None:
+            logger.info("Starting Playwright runtime")
             self._playwright = await async_playwright().start()
         if self._browser is None:
+            logger.info("Launching Chromium browser")
             self._browser = await self._playwright.chromium.launch(
                 headless=True,
                 args=[
@@ -80,16 +95,21 @@ class BrowserReader:
                     "--no-sandbox",
                 ],
             )
+        logger.info("Browser runtime ready in %.2fs", time.perf_counter() - startup_started_at)
 
     async def shutdown(self) -> None:
+        logger.info("Shutting down browser runtime")
         if self._browser is not None:
             await self._browser.close()
             self._browser = None
         if self._playwright is not None:
             await self._playwright.stop()
             self._playwright = None
+        logger.info("Browser runtime shutdown completed")
 
     async def browse_and_extract(self, url: str, mode: str = "article") -> ExtractResult:
+        process_started_at = time.perf_counter()
+        logger.info("Browse/extract request started: url=%s mode=%s", url, mode)
         await self.startup()
         page = await self._browser.new_page()
         network_hints: List[Dict[str, Any]] = []
@@ -121,10 +141,12 @@ class BrowserReader:
         final_url: Optional[str] = None
 
         try:
+            logger.debug("Navigating page and waiting for network idle")
             resp = await page.goto(url, wait_until="networkidle", timeout=30000)
             if resp is not None:
                 status_code = resp.status
                 final_url = resp.url
+                logger.info("Navigation completed: status=%s final_url=%s", status_code, final_url)
 
             # opzionale: tentativo generico di click sul banner cookie
             try:
@@ -132,6 +154,7 @@ class BrowserReader:
                 if cookie_button:
                     await cookie_button.click()
                     diagnostics["used_cookie_click"] = True
+                    logger.debug("Cookie banner accepted via generic button selector")
             except Exception:
                 pass
 
@@ -142,9 +165,11 @@ class BrowserReader:
             html = await page.content()
         finally:
             await page.close()
+            logger.debug("Page closed after extraction attempt")
 
         # Fallback se non c'è HTML
         if not html:
+            logger.warning("Extraction produced empty HTML for url=%s", url)
             return ExtractResult(
                 url=url,
                 final_url=final_url,
@@ -236,16 +261,28 @@ class BrowserReader:
             if paragraphs:
                 main_text = "\n\n".join(paragraphs)
                 confidence = min(1.0, 0.4 + 0.01 * len(paragraphs))  # euristica semplicissima
+                logger.info("Extracted %s paragraphs with confidence %.2f", len(paragraphs), confidence)
 
             diagnostics["reader_success"] = main_text is not None
         except Exception as e:
             diagnostics["extraction_notes"] = f"readability_error: {type(e).__name__}"
+            logger.exception("Readability extraction failed for url=%s", url)
 
         # se main_text è vuoto, possiamo abbassare content_source
         if not main_text:
             content_source = "heuristic"
             confidence = 0.1
             # potresti qui aggiungere una seconda passata euristica custom
+
+        elapsed = time.perf_counter() - process_started_at
+        logger.info(
+            "Browse/extract completed: url=%s status=%s paragraphs=%s confidence=%.2f elapsed=%.2fs",
+            url,
+            status_code,
+            len(paragraphs),
+            confidence,
+            elapsed,
+        )
 
         return ExtractResult(
             url=url,
@@ -284,7 +321,9 @@ async def browse_extract(url: str, mode: str = "article") -> Dict[str, Any]:
     e prova a estrarre il contenuto principale (titolo, testo, meta).
     `mode` per ora è solo informativo.
     """
+    logger.info("Tool call received: browse_extract url=%s mode=%s", url, mode)
     result = await browser_reader.browse_and_extract(url, mode=mode)
+    logger.info("Tool call finished: browse_extract url=%s", url)
     return asdict(result)
 
 @mcp.tool()
@@ -307,10 +346,21 @@ async def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
     Returns:
         RisultatoRicerca con i metadati di paginazione e la lista delle sentenze.
     """
-    return await cerca_sentenze(parole, pagina)
+    logger.info("Tool call received: cerca_sentenze parole=%s pagina=%s", parole, pagina)
+    started_at = time.perf_counter()
+    result = await cerca_sentenze(parole, pagina)
+    logger.info(
+        "Tool call finished: cerca_sentenze parole=%s pagina=%s totale=%s elapsed=%.2fs",
+        parole,
+        pagina,
+        result.totale_risultati,
+        time.perf_counter() - started_at,
+    )
+    return result
 
 if __name__ == "__main__":
     # Heroku richiede un processo web in ascolto su PORT,
     # mentre in locale puo rimanere il trasporto stdio.
     transport = os.getenv("MCP_TRANSPORT", "stdio")
+    logger.info("Starting MCP server host=%s port=%s transport=%s", MCP_HOST, MCP_PORT, transport)
     mcp.run(transport=transport)

@@ -10,7 +10,9 @@ Il portale target è:
 """
 
 import asyncio
+import logging
 import re
+import time
 
 from fastmcp import FastMCP
 from playwright.async_api import Page, async_playwright
@@ -21,6 +23,8 @@ BASE_URL = "https://www.italgiure.giustizia.it/sncass/"
 
 # Numero di risultati per pagina restituiti dal portale
 RISULTATI_PER_PAGINA = 10
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Modelli Pydantic per la struttura dei dati
@@ -115,6 +119,7 @@ async def _extract_cards(page: Page) -> list[Sentenza]:
         Lista di oggetti Sentenza estratti dalla pagina corrente.
     """
     cards = await page.query_selector_all(".card")
+    logger.debug("Found %s result cards in current page", len(cards))
     sentenze: list[Sentenza] = []
     for card in cards:
         # L'estratto OCR contiene lo snippet di testo con le keyword evidenziate
@@ -195,6 +200,7 @@ async def _navigate_to_page(page: Page, target_page: int) -> bool:
     # Tentativo diretto: clicca il link della pagina se visibile nel pager
     pager_link = await page.query_selector(f'.pager[data-arg="{target_page}"]')
     if pager_link:
+        logger.debug("Navigating directly to page %s", target_page)
         await pager_link.click()
         await asyncio.sleep(3)
         return True
@@ -202,6 +208,7 @@ async def _navigate_to_page(page: Page, target_page: int) -> bool:
     # Se il link diretto non è visibile, naviga incrementalmente con le frecce
     _, current, total = await _get_pagination_info(page)
     if target_page > total or target_page < 1:
+        logger.warning("Requested page %s is out of bounds (total=%s)", target_page, total)
         return False
 
     while current != target_page:
@@ -210,18 +217,21 @@ async def _navigate_to_page(page: Page, target_page: int) -> bool:
         else:
             arrow = await page.query_selector('.pagerArrow[title="pagina precedente"]')
         if not arrow:
+            logger.warning("Pager arrow not found while navigating to page %s", target_page)
             return False
         await arrow.click()
         await asyncio.sleep(3)
 
         _, new_current, _ = await _get_pagination_info(page)
         if new_current == current:
+            logger.warning("Pager did not advance from page %s", current)
             return False  # La pagina non è cambiata, impossibile proseguire
         current = new_current
 
         # Dopo ogni salto, ricontrolla se il link diretto è ora visibile
         pager_link = await page.query_selector(f'.pager[data-arg="{target_page}"]')
         if pager_link:
+            logger.debug("Page %s became directly visible in pager", target_page)
             await pager_link.click()
             await asyncio.sleep(3)
             return True
@@ -256,6 +266,8 @@ async def cerca_sentenze(
     Returns:
         RisultatoRicerca con i metadati di paginazione e la lista delle sentenze.
     """
+    started_at = time.perf_counter()
+    logger.info("Search started: parole=%s pagina=%s", parole, pagina)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         try:
@@ -272,6 +284,7 @@ async def cerca_sentenze(
             # Compila il campo di ricerca "Parole o Numero/Anno sentenza" (#searchterm)
             search_input = await page.query_selector("#searchterm")
             if not search_input:
+                logger.error("Search input #searchterm not found")
                 return RisultatoRicerca(
                     parole_cercate=parole,
                     totale_risultati=0,
@@ -291,6 +304,7 @@ async def cerca_sentenze(
             if cerca_btn:
                 await cerca_btn.click()
             else:
+                logger.debug("Search button not found; submitting form via JS fallback")
                 await page.evaluate("$('#z-form').submit();")
 
             # Attendi il caricamento AJAX dei risultati
@@ -301,6 +315,7 @@ async def cerca_sentenze(
             if no_data:
                 visible = await no_data.is_visible()
                 if visible:
+                    logger.info("Search completed with no results: parole=%s", parole)
                     return RisultatoRicerca(
                         parole_cercate=parole,
                         totale_risultati=0,
@@ -314,6 +329,11 @@ async def cerca_sentenze(
                 navigated = await _navigate_to_page(page, pagina)
                 if not navigated:
                     totale, _, totale_pagine = await _get_pagination_info(page)
+                    logger.warning(
+                        "Could not navigate to requested page=%s for parole=%s",
+                        pagina,
+                        parole,
+                    )
                     return RisultatoRicerca(
                         parole_cercate=parole,
                         totale_risultati=totale,
@@ -326,6 +346,15 @@ async def cerca_sentenze(
             totale, pagina_corrente, totale_pagine = await _get_pagination_info(page)
             sentenze = await _extract_cards(page)
 
+            logger.info(
+                "Search completed: parole=%s pagina=%s totale=%s page_results=%s elapsed=%.2fs",
+                parole,
+                pagina_corrente,
+                totale,
+                len(sentenze),
+                time.perf_counter() - started_at,
+            )
+
             return RisultatoRicerca(
                 parole_cercate=parole,
                 totale_risultati=totale,
@@ -335,3 +364,4 @@ async def cerca_sentenze(
             )
         finally:
             await browser.close()
+            logger.debug("Playwright browser closed for search request")
