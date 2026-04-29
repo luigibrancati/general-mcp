@@ -1,4 +1,4 @@
-# Sentenze Cassazione — Server MCP
+# Server MCP
 
 Server [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) per la ricerca di sentenze della **Corte Suprema di Cassazione** italiana tramite il portale [ItalgiureWeb / SentenzeWeb](https://www.italgiure.giustizia.it/sncass/).
 

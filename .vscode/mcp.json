@@ -1,0 +1,13 @@
+{
+	"mcpServers": {
+		"general-mcp": {
+			"type": "stdio",
+			"command": "uv",
+			"args": [
+				"run",
+				"main.py"
+			]
+		}
+	},
+	"inputs": []
+}

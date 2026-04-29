@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "general-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "main.py"
+      ],
+      "cwd": "/Users/b741dk/projects/axa/perplexity_aml/general-mcp"
+    }
+  },
+  "inputs": []
+}
