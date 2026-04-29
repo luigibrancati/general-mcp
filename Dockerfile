@@ -8,6 +8,9 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY general_mcp ./general_mcp
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . && \
+    playwright install --with-deps chromium
+
+ENV PLAYWRIGHT_BROWSERS_INSTALLED=1
 
 CMD ["python", "-m", "general_mcp.server"]

@@ -33,7 +33,11 @@ def _ensure_playwright_browsers() -> None:
 
     Necessario in ambienti di deploy (es. Horizon Prefect) dove il pacchetto
     Python è installato ma i binari del browser non sono stati scaricati.
+    Skippato se i browser sono già installati (es. nel Docker image).
     """
+    if os.getenv("PLAYWRIGHT_BROWSERS_INSTALLED"):
+        logger.info("Playwright browsers already installed (PLAYWRIGHT_BROWSERS_INSTALLED set), skipping")
+        return
     try:
         logger.info("Installing Playwright Chromium with dependencies")
         subprocess.run(
