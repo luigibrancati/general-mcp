@@ -5,7 +5,7 @@
       "command": "uv",
       "args": [
         "run",
-        "main.py"
+        "server.py"
       ],
       "cwd": "/Users/b741dk/projects/axa/perplexity_aml/general-mcp"
     }

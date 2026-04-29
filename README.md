@@ -27,7 +27,7 @@ uv run playwright install chromium
 ## Avvio del server
 
 ```bash
-uv run python main.py
+uv run python server.py
 ```
 
 Il server si avvia con trasporto **stdio** (standard input/output), il protocollo predefinito per MCP.
@@ -63,7 +63,7 @@ La configurazione imposta il processo `web` con trasporto HTTP:
 Per test locale in stdio resta invariato:
 
 ```bash
-uv run python main.py
+uv run python server.py
 ```
 
 ## Configurazione con client MCP
@@ -77,7 +77,7 @@ Aggiungi al file di configurazione `claude_desktop_config.json`:
   "mcpServers": {
     "sentenze-cassazione": {
       "command": "uv",
-      "args": ["run", "python", "main.py"],
+      "args": ["run", "python", "server.py"],
       "cwd": "/percorso/assoluto/a/test_sentenze_mcp"
     }
   }
@@ -93,7 +93,7 @@ Aggiungi al file `.vscode/mcp.json` del workspace:
   "servers": {
     "sentenze-cassazione": {
       "command": "uv",
-      "args": ["run", "python", "main.py"],
+      "args": ["run", "python", "server.py"],
       "cwd": "${workspaceFolder}"
     }
   }
@@ -150,7 +150,7 @@ Ogni pagina contiene fino a **10 risultati**. Per ottenere i risultati successiv
 
 ```
 test_sentenze_mcp/
-├── main.py           # Server MCP con lo strumento cerca_sentenze
+├── server.py           # Server MCP con lo strumento cerca_sentenze
 ├── pyproject.toml    # Configurazione progetto e dipendenze
 └── README.md         # Questa documentazione
 ```
