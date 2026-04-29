@@ -52,8 +52,14 @@ heroku container:release web -a <nome-app>
 
 ```bash
 heroku create <nome-app>
+heroku buildpacks:clear -a <nome-app>
+heroku buildpacks:add --index 1 heroku-community/apt -a <nome-app>
+heroku buildpacks:add --index 2 heroku/python -a <nome-app>
 git push heroku main
 ```
+
+Per questa modalita, il file [Aptfile](Aptfile) installa le librerie di sistema richieste da Chromium/Playwright
+(ad esempio `libatk-1.0.so.0`) ed evita errori di avvio del browser headless nei dyno Heroku.
 
 La configurazione imposta il processo `web` con trasporto HTTP:
 

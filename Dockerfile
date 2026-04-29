@@ -6,8 +6,8 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
-COPY server.py sentenze.py ./
+COPY general_mcp ./general_mcp
 
 RUN pip install --no-cache-dir .
 
-CMD ["python", "server.py"]
+CMD ["python", "-m", "general_mcp.server"]
