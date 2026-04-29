@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
@@ -270,7 +271,10 @@ class BrowserReader:
 
 # MCP server setup con FastMCP[web:54][web:60][web:85]
 
-mcp = FastMCP(name="BrowserReader", host="0.0.0.0", port=8051)
+MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
+MCP_PORT = int(os.getenv("PORT", os.getenv("MCP_PORT", "8051")))
+
+mcp = FastMCP(name="BrowserReader", host=MCP_HOST, port=MCP_PORT)
 browser_reader = BrowserReader()
 
 
@@ -307,7 +311,7 @@ def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
     return asyncio.run(cerca_sentenze(parole, pagina))
 
 if __name__ == "__main__":
-    # se vuoi usarlo via HTTP come remote connector:
-    # mcp.run(transport="streamable-http")
-    # per Local MCP via stdio, puoi usare:
-    mcp.run(transport="stdio")
+    # Heroku richiede un processo web in ascolto su PORT,
+    # mentre in locale puo rimanere il trasporto stdio.
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    mcp.run(transport=transport)

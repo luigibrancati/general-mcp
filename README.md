@@ -32,6 +32,40 @@ uv run python main.py
 
 Il server si avvia con trasporto **stdio** (standard input/output), il protocollo predefinito per MCP.
 
+## Deploy su Heroku
+
+Sono supportate due modalita di deploy:
+
+1. **Container stack (consigliata)**: usa [Dockerfile](Dockerfile) e [heroku.yml](heroku.yml), piu affidabile con Playwright/Chromium.
+2. **Python buildpack**: usa [Procfile](Procfile) e [.python-version](.python-version).
+
+### Opzione consigliata: container stack
+
+```bash
+heroku create <nome-app>
+heroku stack:set container -a <nome-app>
+heroku container:push web -a <nome-app>
+heroku container:release web -a <nome-app>
+```
+
+### Opzione alternativa: Python buildpack
+
+```bash
+heroku create <nome-app>
+git push heroku main
+```
+
+La configurazione imposta il processo `web` con trasporto HTTP:
+
+- `MCP_TRANSPORT=streamable-http`
+- binding su `PORT` (fornita da Heroku)
+
+Per test locale in stdio resta invariato:
+
+```bash
+uv run python main.py
+```
+
 ## Configurazione con client MCP
 
 ### Claude Desktop
