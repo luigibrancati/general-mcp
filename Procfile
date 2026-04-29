@@ -1,1 +1,1 @@
-web: MCP_TRANSPORT=streamable-http python main.py
+web: MCP_TRANSPORT=streamable-http python general_mcp/main.py
