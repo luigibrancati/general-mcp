@@ -9,6 +9,7 @@ description = "Server MCP per la ricerca di sentenze della Corte di Cassazione i
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "beautifulsoup4>=4.14.3",
     "fastmcp>=3.1.1",
     "lxml>=6.1.0",
     "playwright>=1.58.0",

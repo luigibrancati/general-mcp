@@ -13,7 +13,7 @@ from lxml import html as lxml_html
 import subprocess
 import sys
 from general_mcp.sentenze import cerca_sentenze  # import dello strumento Sentenze come esempio di tool aggiuntivo
-
+from google_web_search_tool import WebSearchInput, WebSearchTool
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -77,6 +77,25 @@ class ExtractResult:
     html_main: Optional[str]
     html_full: Optional[str]
     network_hints: List[Dict[str, Any]]
+    diagnostics: Dict[str, Any]
+
+
+@dataclass
+class GoogleSearchItem:
+    position: int
+    title: str
+    url: str
+    display_url: Optional[str]
+    snippet: Optional[str]
+
+
+@dataclass
+class GoogleSearchResult:
+    query: str
+    requested_results: int
+    final_url: Optional[str]
+    status: Optional[int]
+    items: List[GoogleSearchItem]
     diagnostics: Dict[str, Any]
 
 
@@ -396,6 +415,170 @@ class BrowserReader:
             diagnostics=diagnostics,
         )
 
+    async def google_search(self, query: str, num_results: int = 10) -> GoogleSearchResult:
+        """Esegue una ricerca Google via browser headless e raccoglie i risultati organici.
+
+        Nota: il rendering della SERP puo variare per geo, lingua e anti-bot checks.
+        """
+        search_started_at = time.perf_counter()
+        logger.info("Google search request started: query=%s num_results=%s", query, num_results)
+
+        await self.startup()
+        page = await self._browser.new_page()
+
+        diagnostics: Dict[str, Any] = {
+            "cookie_banner_handled": False,
+            "consent_page_detected": False,
+            "selector_used": None,
+            "notes": "",
+        }
+
+        items: List[GoogleSearchItem] = []
+        final_url: Optional[str] = None
+        status_code: Optional[int] = None
+
+        # Limite ragionevole per evitare payload troppo grandi.
+        requested = max(1, min(int(num_results), 30))
+
+        try:
+            resp = await page.goto("https://www.google.com/?hl=en", wait_until="domcontentloaded", timeout=60000)
+            if resp is not None:
+                status_code = resp.status
+                final_url = resp.url
+
+            diagnostics["cookie_banner_handled"] = await self.handle_cookie_banners(page)
+
+            # Alcune pagine richiedono il submit form invece della URL diretta.
+            search_url = f"https://www.google.com/search?q={query}&hl=en&num={requested}"
+            resp = await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+            if resp is not None:
+                status_code = resp.status
+                final_url = resp.url
+
+            if final_url and "consent.google.com" in final_url:
+                diagnostics["consent_page_detected"] = True
+                diagnostics["notes"] = "Google consent page detected; results may be incomplete"
+
+            # Attende il blocco risultati oppure fallback sul body.
+            try:
+                await page.wait_for_selector("#search", state="attached", timeout=7000)
+            except Exception:
+                await page.wait_for_selector("body", state="attached", timeout=7000)
+
+            extraction_script = """
+                (limit) => {
+                    const out = [];
+                    const seen = new Set();
+
+                    const selectors = [
+                        '#search .MjjYud',
+                        '#search .g',
+                        'div[data-sokoban-container] > div'
+                    ];
+
+                    let blocks = [];
+                    for (const sel of selectors) {
+                        const found = Array.from(document.querySelectorAll(sel));
+                        if (found.length > blocks.length) {
+                            blocks = found;
+                        }
+                    }
+
+                    for (const block of blocks) {
+                        if (out.length >= limit) break;
+
+                        const a = block.querySelector('a[href]');
+                        const h3 = block.querySelector('h3');
+                        if (!a || !h3) continue;
+
+                        const href = a.getAttribute('href') || '';
+                        if (!href) continue;
+                        if (
+                            href.startsWith('/search') ||
+                            href.startsWith('/preferences') ||
+                            href.startsWith('/setprefs') ||
+                            href.startsWith('/advanced_search')
+                        ) {
+                            continue;
+                        }
+
+                        let url = href;
+                        if (href.startsWith('/url?')) {
+                            try {
+                                const u = new URL('https://www.google.com' + href);
+                                const q = u.searchParams.get('q');
+                                if (q) url = q;
+                            } catch {
+                                // ignore parse errors and keep raw href
+                            }
+                        }
+
+                        if (!/^https?:\/\//i.test(url)) continue;
+                        if (seen.has(url)) continue;
+                        seen.add(url);
+
+                        const snippetNode =
+                            block.querySelector('[data-sncf]') ||
+                            block.querySelector('.VwiC3b') ||
+                            block.querySelector('.yXK7lf') ||
+                            block.querySelector('span.aCOpRe');
+                        const snippet = snippetNode ? snippetNode.textContent.trim() : null;
+
+                        const displayNode = block.querySelector('cite');
+                        const displayUrl = displayNode ? displayNode.textContent.trim() : null;
+
+                        out.push({
+                            title: h3.textContent ? h3.textContent.trim() : '',
+                            url,
+                            display_url: displayUrl,
+                            snippet,
+                        });
+                    }
+
+                    return out;
+                }
+            """
+            raw_items = await page.evaluate(extraction_script, requested)
+
+            for idx, item in enumerate(raw_items, start=1):
+                title = (item.get("title") or "").strip()
+                url = (item.get("url") or "").strip()
+                if not title or not url:
+                    continue
+                items.append(
+                    GoogleSearchItem(
+                        position=idx,
+                        title=title,
+                        url=url,
+                        display_url=item.get("display_url"),
+                        snippet=item.get("snippet"),
+                    )
+                )
+
+            diagnostics["selector_used"] = "google-serp-generic"
+            if not items and not diagnostics["notes"]:
+                diagnostics["notes"] = "No organic results parsed from SERP"
+
+        finally:
+            await page.close()
+
+        logger.info(
+            "Google search completed: query=%s items=%s status=%s elapsed=%.2fs",
+            query,
+            len(items),
+            status_code,
+            time.perf_counter() - search_started_at,
+        )
+
+        return GoogleSearchResult(
+            query=query,
+            requested_results=requested,
+            final_url=final_url,
+            status=status_code,
+            items=items,
+            diagnostics=diagnostics,
+        )
+
 
 # MCP server setup con FastMCP[web:54][web:60][web:85]
 
@@ -404,6 +587,7 @@ MCP_PORT = int(os.getenv("PORT", os.getenv("MCP_PORT", "8051")))
 
 mcp = FastMCP(name="BrowserReader", host=MCP_HOST, port=MCP_PORT)
 browser_reader = BrowserReader()
+google_search = WebSearchTool(api_key='')
 
 
 @mcp.tool()
@@ -450,9 +634,70 @@ async def cerca_sentenze_wrapper(parole: str, pagina: int = 1) -> Any:
     )
     return result
 
+
+# @mcp.tool()
+# async def google_web_search(query: str, num_results: int = 10) -> Dict[str, Any]:
+#     """Esegue una ricerca web su Google e restituisce URL e metadati dei risultati.
+
+#     Args:
+#         query: Testo della query da ricercare.
+#         num_results: Numero massimo di risultati richiesti (1-30, default 10).
+
+#     Returns:
+#         Struttura con risultati organici estratti dalla SERP.
+#     """
+#     logger.info("Tool call received: google_web_search query=%s num_results=%s", query, num_results)
+#     result = await browser_reader.google_search(query=query, num_results=num_results)
+#     logger.info("Tool call finished: google_web_search query=%s items=%s", query, len(result.items))
+#     return asdict(result)
+
+@mcp.tool()
+async def google_web_search(
+    query: str,
+    num_results: int = 10,
+    engine: str = "duckduckgo",
+) -> Dict[str, Any]:
+    """Esegue una ricerca web su motori multipli e restituisce URL e metadati dei risultati.
+
+    Args:
+        query: Testo della query da ricercare.
+        num_results: Numero massimo di risultati richiesti (1-30, default 10).
+        engine: Motore di ricerca (google, duckduckgo, bing, yahoo).
+
+    Returns:
+        Url e metadati dei risultati organici estratti dalla SERP del motore specificato.
+    """
+    logger.info(
+        "Tool call received: google_web_search query=%s num_results=%s engine=%s",
+        query,
+        num_results,
+        engine,
+    )
+    # result = await browser_reader.google_search(query=query, num_results=num_results)
+    result = await google_search.execute(
+        WebSearchInput(
+            query=query,
+            max_results=num_results,
+            country="it",
+            language="it",
+            safe_search=True,
+            engine=engine,
+        )
+    )
+    logger.info(
+        "Tool call finished: google_web_search query=%s items=%s engine=%s",
+        query,
+        len(result.results),
+        engine,
+    )
+    return result.model_dump(mode='json')
+
 if __name__ == "__main__":
+    import asyncio
     # Heroku richiede un processo web in ascolto su PORT,
     # mentre in locale puo rimanere il trasporto stdio.
-    transport = os.getenv("MCP_TRANSPORT", "stdio")
-    logger.info("Starting MCP server host=%s port=%s transport=%s", MCP_HOST, MCP_PORT, transport)
-    mcp.run(transport=transport)
+    # transport = os.getenv("MCP_TRANSPORT", "stdio")
+    # logger.info("Starting MCP server host=%s port=%s transport=%s", MCP_HOST, MCP_PORT, transport)
+    # mcp.run(transport=transport)
+    res = asyncio.run(google_web_search('Cristina fedele', num_results=10, engine='duckduckgo'))
+    print(res)
