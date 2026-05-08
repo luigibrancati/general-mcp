@@ -13,7 +13,7 @@ from lxml import html as lxml_html
 import subprocess
 import sys
 from general_mcp.sentenze import cerca_sentenze  # import dello strumento Sentenze come esempio di tool aggiuntivo
-from google_web_search_tool import WebSearchInput, WebSearchTool
+from general_mcp.google_web_search_tool import WebSearchInput, WebSearchTool
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
