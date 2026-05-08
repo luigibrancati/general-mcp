@@ -696,8 +696,6 @@ if __name__ == "__main__":
     import asyncio
     # Heroku richiede un processo web in ascolto su PORT,
     # mentre in locale puo rimanere il trasporto stdio.
-    # transport = os.getenv("MCP_TRANSPORT", "stdio")
-    # logger.info("Starting MCP server host=%s port=%s transport=%s", MCP_HOST, MCP_PORT, transport)
-    # mcp.run(transport=transport)
-    res = asyncio.run(google_web_search('Cristina fedele', num_results=10, engine='duckduckgo'))
-    print(res)
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    logger.info("Starting MCP server host=%s port=%s transport=%s", MCP_HOST, MCP_PORT, transport)
+    mcp.run(transport=transport)
